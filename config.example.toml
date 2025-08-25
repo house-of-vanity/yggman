@@ -1,0 +1,24 @@
+[server]
+bind_address = "0.0.0.0"
+port = 8080
+workers = 4
+
+[database]
+url = "sqlite://yggman.db"
+max_connections = 10
+connect_timeout = 30
+acquire_timeout = 30
+idle_timeout = 600
+max_lifetime = 3600
+
+[nodes]
+max_peers_per_node = 3
+topology_update_interval = 60
+
+[modules.web_api]
+enabled = true
+port = 8081
+
+[modules.web_ui]
+enabled = true
+static_dir = "./static"

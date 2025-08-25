@@ -1,0 +1,43 @@
+[package]
+name = "yggman"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "yggman"
+path = "src/main.rs"
+
+[[bin]]
+name = "yggman-agent"
+path = "src/agent.rs"
+
+[dependencies]
+tokio = { version = "1.41", features = ["full"] }
+anyhow = "1.0"
+thiserror = "2.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+arc-swap = "1.7"
+async-trait = "0.1"
+futures = "0.3"
+axum = { version = "0.7", features = ["ws"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors", "fs"] }
+ed25519-dalek = "2.1"
+rand = "0.8"
+base64 = "0.22"
+hex = "0.4"
+clap = { version = "4.5", features = ["derive", "env"] }
+envy = "0.4"
+sea-orm = { version = "1.1", features = ["sqlx-sqlite", "sqlx-postgres", "runtime-tokio-rustls", "macros"] }
+migration = { version = "1.1", package = "sea-orm-migration" }
+uuid = { version = "1.10", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+tokio-tungstenite = "0.24"
+futures-util = "0.3"
+network-interface = "2.0"
+hostname = "0.4"
+lazy_static = "1.5"

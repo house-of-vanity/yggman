@@ -1,0 +1,912 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Yggdrasil Node Manager</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        
+        h1 {
+            color: white;
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 2.5rem;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+        
+        .controls {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            margin-bottom: 30px;
+        }
+        
+        .form-section {
+            margin-bottom: 20px;
+        }
+        
+        .form-section label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #333;
+        }
+        
+        input[type="text"], input[type="number"], select {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid #e0e0e0;
+            border-radius: 5px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+        
+        input[type="text"]:focus, input[type="number"]:focus, select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        
+        .listen-section {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 15px;
+        }
+        
+        .listen-entry {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 10px;
+            align-items: center;
+        }
+        
+        .listen-entry select {
+            width: 150px;
+        }
+        
+        .listen-entry input[type="text"] {
+            width: 150px;
+        }
+        
+        .listen-entry input[type="number"] {
+            width: 100px;
+        }
+        
+        .listen-entry .password-input {
+            flex: 1;
+        }
+        
+        .button-group {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+        }
+        
+        button {
+            padding: 12px 24px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 5px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+        
+        button:active {
+            transform: translateY(0);
+        }
+        
+        button.secondary {
+            background: #6c757d;
+        }
+        
+        button.small {
+            padding: 6px 12px;
+            font-size: 14px;
+        }
+        
+        button.danger {
+            background: #dc3545;
+        }
+        
+        .configs-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(500px, 1fr));
+            gap: 20px;
+        }
+        
+        .node-config {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.1);
+            animation: slideIn 0.3s ease-out;
+        }
+        
+        .node-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 15px;
+        }
+        
+        .node-actions {
+            display: flex;
+            gap: 8px;
+        }
+        
+        .node-info {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin: 20px 0;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 8px;
+        }
+        
+        .info-item {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        
+        .info-label {
+            font-size: 12px;
+            color: #6c757d;
+            text-transform: uppercase;
+            font-weight: 600;
+        }
+        
+        .info-value {
+            font-size: 16px;
+            color: #333;
+            font-weight: 500;
+        }
+        
+        .info-value.public-key {
+            font-family: monospace;
+            font-size: 14px;
+        }
+        
+        .config-toggle {
+            display: flex;
+            gap: 10px;
+            margin: 15px 0;
+        }
+        
+        .config-section {
+            margin-top: 15px;
+            transition: all 0.3s ease;
+        }
+        
+        .node-addresses {
+            margin: 15px 0;
+            padding: 15px;
+            background: #f0f4ff;
+            border-radius: 8px;
+            border: 1px solid #d1dfff;
+        }
+        
+        .addresses-label {
+            font-size: 13px;
+            color: #495057;
+            font-weight: 600;
+            margin-bottom: 10px;
+        }
+        
+        .addresses-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        
+        .address-badge {
+            display: inline-block;
+            padding: 5px 12px;
+            background: white;
+            border: 1px solid #667eea;
+            color: #667eea;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: 500;
+            font-family: monospace;
+        }
+        
+        .no-addresses {
+            color: #6c757d;
+            font-style: italic;
+            font-size: 14px;
+        }
+        
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        .node-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #f0f0f0;
+        }
+        
+        .node-name {
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: #333;
+        }
+        
+        .node-id {
+            font-size: 0.9rem;
+            color: #888;
+            font-family: monospace;
+        }
+        
+        .config-section {
+            margin-bottom: 15px;
+        }
+        
+        .config-label {
+            font-weight: 600;
+            color: #555;
+            margin-bottom: 5px;
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .config-content {
+            background: #f8f9fa;
+            padding: 10px;
+            border-radius: 5px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.85rem;
+            word-break: break-all;
+            max-height: 400px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+        }
+        
+        .copy-button {
+            padding: 5px 10px;
+            font-size: 0.8rem;
+            background: #6c757d;
+            margin-top: 5px;
+        }
+        
+        .status-message {
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            text-align: center;
+            font-weight: 600;
+            animation: fadeIn 0.3s ease-out;
+        }
+        
+        .status-success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .status-error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        
+        .loading {
+            text-align: center;
+            color: white;
+            font-size: 1.2rem;
+            margin: 50px 0;
+        }
+        
+        .empty-state {
+            text-align: center;
+            color: white;
+            font-size: 1.2rem;
+            margin: 50px 0;
+            opacity: 0.8;
+        }
+        
+        .help-text {
+            font-size: 0.85rem;
+            color: #6c757d;
+            margin-top: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Yggdrasil Node Manager</h1>
+        
+        <div id="status-message"></div>
+        
+        <div class="controls">
+            <h2 id="form-title">Add New Node</h2>
+            <div class="form-section">
+                <label for="node-name">Node Name</label>
+                <input type="text" id="node-name" placeholder="Enter node name (e.g., node1, gateway, exit)" />
+            </div>
+            
+            
+            <div class="listen-section">
+                <label>Listen Endpoints</label>
+                <div class="help-text">Configure endpoints for this node to listen on for incoming connections</div>
+                
+                <div id="listen-entries">
+                    <div class="listen-entry" data-index="0">
+                        <select class="protocol-select">
+                            <option value="tcp">TCP</option>
+                            <option value="tls">TCP+TLS</option>
+                            <option value="quic">QUIC+TLS</option>
+                            <option value="unix">UNIX Socket</option>
+                            <option value="ws">WebSocket</option>
+                            <option value="wss">WebSocket+TLS</option>
+                        </select>
+                        
+                        <input type="text" class="bind-address" placeholder="Bind address" value="[::]" />
+                        <input type="number" class="port" placeholder="Port" value="9001" min="1" max="65535" />
+                        <input type="text" class="password-input" placeholder="Password (optional, max 64 chars)" maxlength="64" />
+                        
+                        <button class="small danger" onclick="removeListenEntry(0)">Remove</button>
+                    </div>
+                </div>
+                
+                <button class="small secondary" onclick="addListenEntry()">Add Listen Endpoint</button>
+            </div>
+            
+            <div class="button-group">
+                <button onclick="addNode()">Add Node</button>
+                <button class="secondary" onclick="refreshConfigs()">Refresh Configs</button>
+            </div>
+        </div>
+        
+        <div id="configs-container" class="configs-grid">
+            <div class="empty-state">No nodes configured. Add a node to get started.</div>
+        </div>
+    </div>
+    
+    <script>
+        let listenEntryCount = 1;
+        
+        function addListenEntry() {
+            const container = document.getElementById('listen-entries');
+            const index = listenEntryCount++;
+            
+            const entry = document.createElement('div');
+            entry.className = 'listen-entry';
+            entry.dataset.index = index;
+            entry.innerHTML = `
+                <select class="protocol-select">
+                    <option value="tcp">TCP</option>
+                    <option value="tls">TCP+TLS</option>
+                    <option value="quic">QUIC+TLS</option>
+                    <option value="unix">UNIX Socket</option>
+                    <option value="ws">WebSocket</option>
+                    <option value="wss">WebSocket+TLS</option>
+                </select>
+                
+                <input type="text" class="bind-address" placeholder="Bind address" value="[::]" />
+                <input type="number" class="port" placeholder="Port" value="${9001 + index}" min="1" max="65535" />
+                <input type="text" class="password-input" placeholder="Password (optional, max 64 chars)" maxlength="64" />
+                
+                <button class="small danger" onclick="removeListenEntry(${index})">Remove</button>
+            `;
+            
+            container.appendChild(entry);
+            
+            // Update unix socket handler
+            entry.querySelector('.protocol-select').addEventListener('change', function(e) {
+                updateListenEntryForProtocol(entry, e.target.value);
+            });
+        }
+        
+        function removeListenEntry(index) {
+            const entry = document.querySelector(`.listen-entry[data-index="${index}"]`);
+            if (entry && document.querySelectorAll('.listen-entry').length > 1) {
+                entry.remove();
+            } else if (document.querySelectorAll('.listen-entry').length === 1) {
+                showStatus('Must have at least one listen endpoint', 'error');
+            }
+        }
+        
+        function updateListenEntryForProtocol(entry, protocol) {
+            const bindInput = entry.querySelector('.bind-address');
+            const portInput = entry.querySelector('.port');
+            
+            if (protocol === 'unix') {
+                bindInput.style.display = 'none';
+                portInput.style.display = 'none';
+                
+                // Add unix socket path input
+                if (!entry.querySelector('.unix-path')) {
+                    const unixInput = document.createElement('input');
+                    unixInput.type = 'text';
+                    unixInput.className = 'unix-path';
+                    unixInput.placeholder = '/path/to/socket.sock';
+                    unixInput.style.flex = '1';
+                    entry.insertBefore(unixInput, entry.querySelector('.password-input'));
+                }
+            } else {
+                bindInput.style.display = 'block';
+                portInput.style.display = 'block';
+                
+                // Remove unix socket path input if exists
+                const unixInput = entry.querySelector('.unix-path');
+                if (unixInput) {
+                    unixInput.remove();
+                }
+            }
+        }
+        
+        function collectListenEndpoints() {
+            const entries = document.querySelectorAll('.listen-entry');
+            const endpoints = [];
+            
+            entries.forEach(entry => {
+                const protocol = entry.querySelector('.protocol-select').value;
+                const password = entry.querySelector('.password-input').value.trim();
+                
+                let endpoint = '';
+                
+                if (protocol === 'unix') {
+                    const path = entry.querySelector('.unix-path')?.value.trim();
+                    if (path) {
+                        endpoint = `unix://${path}`;
+                    }
+                } else {
+                    const bindAddr = entry.querySelector('.bind-address').value.trim();
+                    const port = entry.querySelector('.port').value;
+                    
+                    if (bindAddr && port) {
+                        endpoint = `${protocol}://${bindAddr}:${port}`;
+                    }
+                }
+                
+                if (endpoint) {
+                    if (password) {
+                        endpoint += `?password=${encodeURIComponent(password)}`;
+                    }
+                    endpoints.push(endpoint);
+                }
+            });
+            
+            return endpoints;
+        }
+        
+        async function addNode() {
+            const nameInput = document.getElementById('node-name');
+            const name = nameInput.value.trim();
+            
+            if (!name) {
+                showStatus('Please enter a node name', 'error');
+                return;
+            }
+            
+            // Extract addresses from listen endpoints
+            const addresses = [];
+            
+            const listen = collectListenEndpoints();
+            
+            if (listen.length === 0) {
+                showStatus('Please configure at least one listen endpoint', 'error');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/nodes', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ name, listen, addresses }),
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    showStatus('Node added successfully!', 'success');
+                    nameInput.value = '';
+                    resetListenEntries();
+                    await refreshConfigs();
+                } else {
+                    showStatus(result.message, 'error');
+                }
+            } catch (error) {
+                showStatus('Failed to add node: ' + error.message, 'error');
+            }
+        }
+        
+        async function refreshConfigs() {
+            const container = document.getElementById('configs-container');
+            container.innerHTML = '<div class="loading">Loading configurations...</div>';
+            
+            try {
+                const response = await fetch('/api/configs');
+                const data = await response.json();
+                
+                if (data.configs.length === 0) {
+                    container.innerHTML = '<div class="empty-state">No nodes configured. Add a node to get started.</div>';
+                    return;
+                }
+                
+                container.innerHTML = data.configs.map((nodeConfig, index) => {
+                    const peersCount = nodeConfig.config.Peers ? nodeConfig.config.Peers.length : 0;
+                    const listenCount = nodeConfig.config.Listen ? nodeConfig.config.Listen.length : 0;
+                    const allowedKeysCount = nodeConfig.config.AllowedPublicKeys ? nodeConfig.config.AllowedPublicKeys.length : 0;
+                    
+                    return `
+                    <div class="node-config">
+                        <div class="node-header">
+                            <div>
+                                <div class="node-name">${nodeConfig.node_name}</div>
+                                <div class="node-id">${nodeConfig.node_id}</div>
+                            </div>
+                            <div class="node-actions">
+                                <button class="small" onclick="editNode('${nodeConfig.node_id}')">Edit</button>
+                                <button class="small danger" onclick="deleteNode('${nodeConfig.node_id}', '${nodeConfig.node_name}')">Delete</button>
+                            </div>
+                        </div>
+                        
+                        <div class="node-info">
+                            <div class="info-item">
+                                <span class="info-label">Listen Endpoints:</span>
+                                <span class="info-value">${listenCount}</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">Peers:</span>
+                                <span class="info-value">${peersCount}</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">Allowed Keys:</span>
+                                <span class="info-value">${allowedKeysCount}</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">Public Key:</span>
+                                <span class="info-value public-key">${nodeConfig.config.AllowedPublicKeys ? 
+                                    nodeConfig.config.PrivateKey.substring(64, 72) + '...' : 'N/A'}</span>
+                            </div>
+                        </div>
+                        
+                        <div class="node-addresses">
+                            <div class="addresses-label">Node IP Addresses:</div>
+                            <div class="addresses-list">
+                                ${nodeConfig.node_addresses && nodeConfig.node_addresses.length > 0 
+                                    ? nodeConfig.node_addresses.map(addr => `<span class="address-badge">${addr}</span>`).join('')
+                                    : '<span class="no-addresses">No addresses configured (using localhost)</span>'}
+                            </div>
+                        </div>
+                        
+                        <div class="config-toggle">
+                            <button class="small secondary" onclick="toggleConfig('config-${index}')">
+                                <span id="toggle-text-${index}">Show Full Config</span>
+                            </button>
+                            <button class="small" onclick="copyToClipboard('${escapeJson(JSON.stringify(nodeConfig.config, null, 2))}')">Copy Config</button>
+                        </div>
+                        
+                        <div id="config-${index}" class="config-section" style="display: none;">
+                            <div class="config-label">Full Yggdrasil Configuration (JSON)</div>
+                            <div class="config-content">${JSON.stringify(nodeConfig.config, null, 2)}</div>
+                        </div>
+                    </div>
+                `}).join('');
+            } catch (error) {
+                container.innerHTML = '<div class="empty-state">Failed to load configurations: ' + error.message + '</div>';
+            }
+        }
+        
+        function showStatus(message, type) {
+            const statusDiv = document.getElementById('status-message');
+            statusDiv.className = `status-message status-${type}`;
+            statusDiv.textContent = message;
+            statusDiv.style.display = 'block';
+            
+            setTimeout(() => {
+                statusDiv.style.display = 'none';
+            }, 3000);
+        }
+        
+        function copyToClipboard(text) {
+            navigator.clipboard.writeText(text).then(() => {
+                showStatus('Copied to clipboard!', 'success');
+            }).catch(() => {
+                showStatus('Failed to copy to clipboard', 'error');
+            });
+        }
+        
+        function escapeJson(str) {
+            return str.replace(/'/g, "\\'").replace(/"/g, '\\"').replace(/\n/g, '\\n');
+        }
+        
+        // Initialize protocol change handler for the first entry
+        document.querySelector('.protocol-select').addEventListener('change', function(e) {
+            const entry = e.target.closest('.listen-entry');
+            updateListenEntryForProtocol(entry, e.target.value);
+        });
+        
+        // Load configs on page load
+        refreshConfigs();
+        
+        // Allow Enter key to add node
+        document.getElementById('node-name').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                addNode();
+            }
+        });
+        
+        // Edit node function
+        async function editNode(nodeId) {
+            try {
+                // Get node data first
+                const response = await fetch(`/api/nodes/${nodeId}`);
+                if (!response.ok) {
+                    throw new Error(`Failed to get node: ${response.status}`);
+                }
+                const nodeData = await response.json();
+                
+                // Populate form with existing data
+                document.getElementById('node-name').value = nodeData.name;
+                
+                // Clear existing listen entries
+                const container = document.getElementById('listen-entries');
+                container.innerHTML = '';
+                
+                // Add listen entries from existing data
+                nodeData.listen.forEach((listenAddr, index) => {
+                    addListenEntry();
+                    const entries = document.querySelectorAll('.listen-entry');
+                    const entry = entries[entries.length - 1]; // Get the last added entry
+                    if (entry) {
+                        populateListenEntry(entry, listenAddr);
+                    }
+                });
+                
+                // Change form title and button
+                document.getElementById('form-title').textContent = 'Edit Node';
+                const submitBtn = document.querySelector('button[onclick="addNode()"]');
+                submitBtn.textContent = 'Update Node';
+                submitBtn.onclick = () => updateNode(nodeId);
+                
+                // Scroll to form
+                document.querySelector('.controls').scrollIntoView({ behavior: 'smooth' });
+                
+            } catch (error) {
+                showStatus('Failed to load node for editing: ' + error.message, 'error');
+            }
+        }
+        
+        // Update node function
+        async function updateNode(nodeId) {
+            const name = document.getElementById('node-name').value.trim();
+            
+            if (!name) {
+                showStatus('Please enter a node name', 'error');
+                return;
+            }
+            
+            // Extract addresses from listen endpoints
+            const addresses = [];
+            
+            const listen = collectListenEndpoints();
+            
+            if (listen.length === 0) {
+                showStatus('Please configure at least one listen endpoint', 'error');
+                return;
+            }
+            
+            try {
+                const response = await fetch(`/api/nodes/${nodeId}`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        name: name,
+                        listen: listen,
+                        addresses: addresses
+                    })
+                });
+                
+                if (response.ok) {
+                    showStatus('Node updated successfully!', 'success');
+                    resetForm();
+                    loadConfigurations();
+                } else {
+                    const error = await response.text();
+                    showStatus('Failed to update node: ' + error, 'error');
+                }
+            } catch (error) {
+                showStatus('Network error: ' + error.message, 'error');
+            }
+        }
+        
+        // Delete node function
+        async function deleteNode(nodeId, nodeName) {
+            if (!confirm(`Are you sure you want to delete node "${nodeName}"? This action cannot be undone.`)) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(`/api/nodes/${nodeId}`, {
+                    method: 'DELETE'
+                });
+                
+                if (response.ok) {
+                    showStatus('Node deleted successfully!', 'success');
+                    resetForm();
+                    loadConfigurations();
+                } else {
+                    const error = await response.text();
+                    showStatus('Failed to delete node: ' + error, 'error');
+                }
+            } catch (error) {
+                showStatus('Network error: ' + error.message, 'error');
+            }
+        }
+        
+        // Helper function to populate listen entry from existing data
+        function populateListenEntry(entry, listenAddr) {
+            const [protocol, rest] = listenAddr.split('://');
+            const protocolSelect = entry.querySelector('.protocol-select');
+            protocolSelect.value = protocol;
+            
+            // Parse address and port
+            let address, port, params = '';
+            if (rest.includes('?')) {
+                [address, params] = rest.split('?');
+                params = '?' + params;
+            } else {
+                address = rest;
+            }
+            
+            if (address.includes(']:')) {
+                // IPv6 format [::]:port
+                const match = address.match(/\[(.*?)\]:(\d+)/);
+                if (match) {
+                    entry.querySelector('.address-input').value = match[1];
+                    entry.querySelector('.port-input').value = match[2];
+                }
+            } else if (address.includes(':')) {
+                // IPv4 format or hostname:port
+                const lastColon = address.lastIndexOf(':');
+                entry.querySelector('.address-input').value = address.substring(0, lastColon);
+                entry.querySelector('.port-input').value = address.substring(lastColon + 1);
+            }
+            
+            // Handle protocol-specific options
+            updateProtocolOptions(entry);
+            
+            // Set password if present
+            if (params.includes('password=')) {
+                const match = params.match(/password=([^&]*)/);
+                if (match) {
+                    const passwordInput = entry.querySelector('.password-input');
+                    if (passwordInput) {
+                        passwordInput.value = decodeURIComponent(match[1]);
+                    }
+                }
+            }
+        }
+        
+        // Reset form to add mode
+        function resetForm() {
+            document.getElementById('form-title').textContent = 'Add New Node';
+            const submitBtn = document.querySelector('button[onclick*="Node"]');
+            submitBtn.textContent = 'Add Node';
+            submitBtn.onclick = addNode;
+            
+            // Clear form
+            document.getElementById('node-name').value = '';
+            const container = document.getElementById('listen-entries');
+            container.innerHTML = `
+                <div class="listen-entry" data-index="0">
+                    <select class="protocol-select">
+                        <option value="tcp">TCP</option>
+                        <option value="tls">TCP+TLS</option>
+                        <option value="quic">QUIC</option>
+                        <option value="ws">WebSocket</option>
+                        <option value="unix">Unix Socket</option>
+                    </select>
+                    <input type="text" class="address-input" placeholder="0.0.0.0" />
+                    <input type="number" class="port-input" placeholder="9001" min="1" max="65535" />
+                    <div class="protocol-options"></div>
+                    <button type="button" class="small danger" onclick="removeListenEntry(0)">Remove</button>
+                </div>
+            `;
+            updateProtocolOptions(document.querySelector('.listen-entry'));
+        }
+        
+        // Helper function to reset listen entries after adding a node
+        // Toggle config visibility
+        function toggleConfig(configId) {
+            const configDiv = document.getElementById(configId);
+            const index = configId.replace('config-', '');
+            const toggleText = document.getElementById(`toggle-text-${index}`);
+            
+            if (configDiv.style.display === 'none') {
+                configDiv.style.display = 'block';
+                toggleText.textContent = 'Hide Full Config';
+            } else {
+                configDiv.style.display = 'none';
+                toggleText.textContent = 'Show Full Config';
+            }
+        }
+        
+        function resetForm() {
+            // Reset form title and button
+            document.getElementById('form-title').textContent = 'Add New Node';
+            const submitBtn = document.querySelector('button[onclick*="Node"]');
+            if (submitBtn) {
+                submitBtn.textContent = 'Add Node';
+                submitBtn.onclick = addNode;
+            }
+            
+            // Reset form fields
+            document.getElementById('node-name').value = '';
+            resetListenEntries();
+        }
+        
+        function resetListenEntries() {
+            const container = document.getElementById('listen-entries');
+            container.innerHTML = `
+                <div class="listen-entry" data-index="0">
+                    <select class="protocol-select">
+                        <option value="tcp">TCP</option>
+                        <option value="tls">TCP+TLS</option>
+                        <option value="quic">QUIC</option>
+                        <option value="ws">WebSocket</option>
+                        <option value="unix">Unix Socket</option>
+                    </select>
+                    <input type="text" class="address-input" placeholder="0.0.0.0" />
+                    <input type="number" class="port-input" placeholder="9001" min="1" max="65535" />
+                    <div class="protocol-options"></div>
+                    <button type="button" class="small danger" onclick="removeListenEntry(0)">Remove</button>
+                </div>
+            `;
+            updateProtocolOptions(document.querySelector('.listen-entry'));
+            listenEntryIndex = 1; // Reset the global index
+        }
+    </script>
+</body>
+</html>
