@@ -1,9 +1,11 @@
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use clap::Parser;
 use futures_util::{SinkExt, StreamExt};
 use network_interface::{NetworkInterface, NetworkInterfaceConfig};
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 use std::time::Duration;
+use std::path::Path;
 use tokio::time::sleep;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 use tracing::{error, info, warn, debug};
@@ -73,11 +75,18 @@ async fn main() -> Result<()> {
         .init();
 
     info!("Starting yggman-agent v{}", env!("CARGO_PKG_VERSION"));
+    
+    // Check for yggdrasil config file
+    let ygg_config_path = find_yggdrasil_config().ok_or_else(|| {
+        anyhow!("Yggdrasil config file not found. Please ensure yggdrasil.conf exists at /etc/yggdrasil.conf or /etc/yggdrasil/yggdrasil.conf")
+    })?;
+    info!("Found Yggdrasil config at: {}", ygg_config_path);
+    
     info!("Connecting to control plane: {}", args.server);
 
     // Main loop with reconnection logic
     loop {
-        match run_agent(&args).await {
+        match run_agent(&args, &ygg_config_path).await {
             Ok(_) => {
                 info!("Agent connection closed normally");
             }
@@ -94,7 +103,7 @@ async fn main() -> Result<()> {
     }
 }
 
-async fn run_agent(args: &Args) -> Result<()> {
+async fn run_agent(args: &Args, ygg_config_path: &str) -> Result<()> {
     // Get node name
     let node_name = args.name.clone().unwrap_or_else(|| {
         hostname::get()
@@ -133,6 +142,37 @@ async fn run_agent(args: &Args) -> Result<()> {
             }
         }
     });
+    
+    // Spawn address scanning task
+    let (address_scan_tx, mut address_scan_rx) = tokio::sync::mpsc::channel(1);
+    let current_addresses = Arc::new(tokio::sync::RwLock::new(addresses.clone()));
+    let current_addresses_clone = current_addresses.clone();
+    
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(60)); // Scan every minute
+        loop {
+            interval.tick().await;
+            
+            match discover_addresses() {
+                Ok(new_addresses) => {
+                    let mut current = current_addresses_clone.write().await;
+                    
+                    // Check if addresses have changed
+                    if *current != new_addresses {
+                        info!("Address change detected: {:?} -> {:?}", *current, new_addresses);
+                        *current = new_addresses.clone();
+                        
+                        if address_scan_tx.send(new_addresses).await.is_err() {
+                            break;
+                        }
+                    }
+                }
+                Err(e) => {
+                    error!("Failed to scan addresses: {}", e);
+                }
+            }
+        }
+    });
 
     // Main message loop
     loop {
@@ -141,7 +181,7 @@ async fn run_agent(args: &Args) -> Result<()> {
                 match msg {
                     Some(Ok(Message::Text(text))) => {
                         match serde_json::from_str::<ServerMessage>(&text) {
-                            Ok(server_msg) => handle_server_message(server_msg).await?,
+                            Ok(server_msg) => handle_server_message(server_msg, ygg_config_path).await?,
                             Err(e) => warn!("Failed to parse server message: {}", e),
                         }
                     }
@@ -168,13 +208,24 @@ async fn run_agent(args: &Args) -> Result<()> {
                 }
                 debug!("Sent heartbeat");
             }
+            Some(new_addresses) = address_scan_rx.recv() => {
+                let update_msg = AgentMessage::UpdateAddresses {
+                    addresses: new_addresses,
+                };
+                let json = serde_json::to_string(&update_msg)?;
+                if let Err(e) = write.send(Message::Text(json)).await {
+                    error!("Failed to send address update: {}", e);
+                    break;
+                }
+                info!("Sent address update to control plane");
+            }
         }
     }
 
     Ok(())
 }
 
-async fn handle_server_message(msg: ServerMessage) -> Result<()> {
+async fn handle_server_message(msg: ServerMessage, ygg_config_path: &str) -> Result<()> {
     match msg {
         ServerMessage::Config {
             node_id,
@@ -193,8 +244,11 @@ async fn handle_server_message(msg: ServerMessage) -> Result<()> {
             }
             info!("  Allowed keys: {} configured", allowed_public_keys.len());
             
-            // TODO: Apply configuration to Yggdrasil
-            info!("Configuration received (not yet applied)");
+            // Apply configuration to Yggdrasil
+            match write_yggdrasil_config(ygg_config_path, &private_key, &listen, &peers, &allowed_public_keys).await {
+                Ok(_) => info!("Configuration successfully applied to {}", ygg_config_path),
+                Err(e) => error!("Failed to write Yggdrasil config: {}", e),
+            }
         }
         ServerMessage::Update {
             peers,
@@ -207,8 +261,12 @@ async fn handle_server_message(msg: ServerMessage) -> Result<()> {
             }
             info!("  Updated allowed keys: {} configured", allowed_public_keys.len());
             
-            // TODO: Apply configuration update to Yggdrasil
-            info!("Configuration update received (not yet applied)");
+            // Apply configuration update to Yggdrasil 
+            // For updates we need to read current config and update only peers/allowed keys
+            match update_yggdrasil_config(ygg_config_path, &peers, &allowed_public_keys).await {
+                Ok(_) => info!("Configuration update successfully applied to {}", ygg_config_path),
+                Err(e) => error!("Failed to update Yggdrasil config: {}", e),
+            }
         }
         ServerMessage::Error { message } => {
             error!("Server error: {}", message);
@@ -251,4 +309,66 @@ fn discover_addresses() -> Result<Vec<String>> {
 
     // If no addresses found, return empty vec (will use localhost)
     Ok(addresses)
+}
+
+fn find_yggdrasil_config() -> Option<String> {
+    let possible_paths = vec![
+        "/etc/yggdrasil.conf",
+        "/etc/yggdrasil/yggdrasil.conf",
+    ];
+    
+    for path in possible_paths {
+        if Path::new(path).exists() {
+            return Some(path.to_string());
+        }
+    }
+    
+    None
+}
+
+async fn write_yggdrasil_config(
+    config_path: &str,
+    private_key: &str,
+    listen: &[String],
+    peers: &[String], 
+    allowed_public_keys: &[String]
+) -> Result<()> {
+    use serde_json::json;
+    
+    let config = json!({
+        "PrivateKey": private_key,
+        "Listen": listen,
+        "Peers": peers,
+        "AllowedPublicKeys": allowed_public_keys,
+        "InterfacePeers": {},
+        "NodeInfo": {},
+        "NodeInfoPrivacy": false
+    });
+    
+    let config_json = serde_json::to_string_pretty(&config)?;
+    tokio::fs::write(config_path, config_json).await?;
+    
+    info!("Yggdrasil configuration written to {}", config_path);
+    Ok(())
+}
+
+async fn update_yggdrasil_config(
+    config_path: &str,
+    peers: &[String],
+    allowed_public_keys: &[String]
+) -> Result<()> {
+    // Read current config
+    let current_config = tokio::fs::read_to_string(config_path).await?;
+    let mut config: serde_json::Value = serde_json::from_str(&current_config)?;
+    
+    // Update only peers and allowed public keys
+    config["Peers"] = serde_json::json!(peers);
+    config["AllowedPublicKeys"] = serde_json::json!(allowed_public_keys);
+    
+    // Write updated config back
+    let updated_config = serde_json::to_string_pretty(&config)?;
+    tokio::fs::write(config_path, updated_config).await?;
+    
+    info!("Yggdrasil configuration updated in {}", config_path);
+    Ok(())
 }

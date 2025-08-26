@@ -5,6 +5,7 @@ mod database;
 mod error;
 mod modules;
 mod node_manager;
+mod settings_manager;
 mod yggdrasil;
 mod websocket_state;
 
@@ -53,9 +54,21 @@ async fn main() -> Result<()> {
     database::migrate_database(&db).await
         .map_err(|e| anyhow::anyhow!("Failed to migrate database: {}", e))?;
     
-    let mut app = core::app::Application::new(config);
+    // Create settings manager and initialize defaults
+    let settings_manager = settings_manager::SettingsManager::new(db.clone());
+    settings_manager.initialize_defaults().await
+        .map_err(|e| anyhow::anyhow!("Failed to initialize settings: {}", e))?;
     
-    app.register_module(Box::new(modules::web::WebModule::new(db)));
+    // Create config manager first
+    let config_manager = config::ConfigManager::new(config);
+    
+    // Load settings from database to config
+    settings_manager.load_settings_to_config(&config_manager).await
+        .map_err(|e| anyhow::anyhow!("Failed to load settings to config: {}", e))?;
+    
+    let mut app = core::app::Application::new_with_managers(config_manager, settings_manager.clone());
+    
+    app.register_module(Box::new(modules::web::WebModule::new(db, settings_manager)));
     
     app.run().await?;
     

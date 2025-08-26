@@ -125,9 +125,15 @@
             background: #6c757d;
         }
         
-        button.small {
+        button.small, a.button.small {
             padding: 6px 12px;
             font-size: 14px;
+        }
+        
+        a.button {
+            display: inline-block;
+            text-decoration: none;
+            text-align: center;
         }
         
         button.danger {
@@ -363,6 +369,19 @@
         <div id="status-message"></div>
         
         <div class="controls">
+            <h2>Listen Template Settings</h2>
+            <p style="margin-bottom: 15px; color: #6c757d; font-size: 14px;">
+                Configure the default listen endpoints that will be applied to new nodes.
+            </p>
+            <div id="template-entries"></div>
+            <button class="small secondary" onclick="addTemplateEntry()">Add Template Entry</button>
+            <div style="margin-top: 15px;">
+                <button onclick="saveListenTemplate()">Save Template</button>
+                <button class="secondary" onclick="loadListenTemplate()">Reset to Current</button>
+            </div>
+        </div>
+        
+        <div class="controls">
             <h2 id="form-title">Add New Node</h2>
             <div class="form-section">
                 <label for="node-name">Node Name</label>
@@ -584,7 +603,7 @@
                                 <div class="node-id">${nodeConfig.node_id}</div>
                             </div>
                             <div class="node-actions">
-                                <button class="small" onclick="editNode('${nodeConfig.node_id}')">Edit</button>
+                                <a href="/edit/${nodeConfig.node_id}" class="button small">Edit</a>
                                 <button class="small danger" onclick="deleteNode('${nodeConfig.node_id}', '${nodeConfig.node_name}')">Delete</button>
                             </div>
                         </div>
@@ -676,85 +695,147 @@
         });
         
         // Edit node function
-        async function editNode(nodeId) {
+        // Listen template management
+        let templateEntryCount = 0;
+        
+        async function loadListenTemplate() {
             try {
-                // Get node data first
-                const response = await fetch(`/api/nodes/${nodeId}`);
-                if (!response.ok) {
-                    throw new Error(`Failed to get node: ${response.status}`);
-                }
-                const nodeData = await response.json();
+                const response = await fetch('/api/settings/listen-template');
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 
-                // Populate form with existing data
-                document.getElementById('node-name').value = nodeData.name;
-                
-                // Clear existing listen entries
-                const container = document.getElementById('listen-entries');
-                container.innerHTML = '';
-                
-                // Add listen entries from existing data
-                nodeData.listen.forEach((listenAddr, index) => {
-                    addListenEntry();
-                    const entries = document.querySelectorAll('.listen-entry');
-                    const entry = entries[entries.length - 1]; // Get the last added entry
-                    if (entry) {
-                        populateListenEntry(entry, listenAddr);
-                    }
-                });
-                
-                // Change form title and button
-                document.getElementById('form-title').textContent = 'Edit Node';
-                const submitBtn = document.querySelector('button[onclick="addNode()"]');
-                submitBtn.textContent = 'Update Node';
-                submitBtn.onclick = () => updateNode(nodeId);
-                
-                // Scroll to form
-                document.querySelector('.controls').scrollIntoView({ behavior: 'smooth' });
+                const data = await response.json();
+                populateTemplateEntries(data.template);
                 
             } catch (error) {
-                showStatus('Failed to load node for editing: ' + error.message, 'error');
+                showStatus('Failed to load listen template: ' + error.message, 'error');
             }
         }
         
-        // Update node function
-        async function updateNode(nodeId) {
-            const name = document.getElementById('node-name').value.trim();
+        function populateTemplateEntries(template) {
+            const container = document.getElementById('template-entries');
+            container.innerHTML = '';
+            templateEntryCount = 0;
             
-            if (!name) {
-                showStatus('Please enter a node name', 'error');
-                return;
+            if (template && template.length > 0) {
+                template.forEach(listenAddr => {
+                    addTemplateEntry();
+                    const entries = document.querySelectorAll('.template-entry');
+                    const entry = entries[entries.length - 1];
+                    if (entry) {
+                        populateTemplateEntry(entry, listenAddr);
+                    }
+                });
+            } else {
+                // Add default entry if no template exists
+                addTemplateEntry();
+            }
+        }
+        
+        function addTemplateEntry() {
+            const container = document.getElementById('template-entries');
+            const index = templateEntryCount++;
+            
+            const entry = document.createElement('div');
+            entry.className = 'template-entry listen-entry';
+            entry.dataset.index = index;
+            entry.innerHTML = `
+                <select class="protocol-select">
+                    <option value="tcp">TCP</option>
+                    <option value="tls">TCP+TLS</option>
+                    <option value="quic">QUIC+TLS</option>
+                    <option value="unix">UNIX Socket</option>
+                    <option value="ws">WebSocket</option>
+                    <option value="wss">WebSocket+TLS</option>
+                </select>
+                <input type="text" class="bind-address" placeholder="Bind address" value="0.0.0.0" />
+                <input type="number" class="port" placeholder="Port" value="9001" min="1" max="65535" />
+                <button class="small danger" onclick="removeTemplateEntry(${index})">Remove</button>
+            `;
+            
+            container.appendChild(entry);
+        }
+        
+        function removeTemplateEntry(index) {
+            const entry = document.querySelector(`.template-entry[data-index="${index}"]`);
+            if (entry) {
+                entry.remove();
+            }
+        }
+        
+        function populateTemplateEntry(entry, listenAddr) {
+            const [protocol, rest] = listenAddr.split('://');
+            const protocolSelect = entry.querySelector('.protocol-select');
+            protocolSelect.value = protocol;
+            
+            let address, port;
+            if (protocol === 'unix') {
+                address = rest;
+                port = '';
+            } else {
+                [address, port] = parseAddressPort(rest);
             }
             
-            // Extract addresses from listen endpoints
-            const addresses = [];
+            entry.querySelector('.bind-address').value = address || '0.0.0.0';
+            if (port) {
+                entry.querySelector('.port').value = port;
+            }
+        }
+        
+        function parseAddressPort(addressPort) {
+            const lastColonIndex = addressPort.lastIndexOf(':');
+            if (lastColonIndex === -1) return [addressPort, ''];
             
-            const listen = collectListenEndpoints();
+            const potentialPort = addressPort.substring(lastColonIndex + 1);
+            if (/^\d+$/.test(potentialPort)) {
+                return [addressPort.substring(0, lastColonIndex), potentialPort];
+            } else {
+                return [addressPort, ''];
+            }
+        }
+        
+        function collectTemplateEndpoints() {
+            const entries = document.querySelectorAll('.template-entry');
+            const endpoints = [];
             
-            if (listen.length === 0) {
-                showStatus('Please configure at least one listen endpoint', 'error');
+            entries.forEach(entry => {
+                const protocol = entry.querySelector('.protocol-select').value;
+                const address = entry.querySelector('.bind-address').value.trim();
+                const port = entry.querySelector('.port').value.trim();
+                
+                if (protocol && address) {
+                    if (protocol === 'unix') {
+                        endpoints.push(`${protocol}://${address}`);
+                    } else if (port) {
+                        endpoints.push(`${protocol}://${address}:${port}`);
+                    }
+                }
+            });
+            
+            return endpoints;
+        }
+        
+        async function saveListenTemplate() {
+            const template = collectTemplateEndpoints();
+            
+            if (template.length === 0) {
+                showStatus('Please configure at least one template entry', 'error');
                 return;
             }
             
             try {
-                const response = await fetch(`/api/nodes/${nodeId}`, {
+                const response = await fetch('/api/settings/listen-template', {
                     method: 'PUT',
                     headers: {
                         'Content-Type': 'application/json'
                     },
-                    body: JSON.stringify({
-                        name: name,
-                        listen: listen,
-                        addresses: addresses
-                    })
+                    body: JSON.stringify({ template })
                 });
                 
                 if (response.ok) {
-                    showStatus('Node updated successfully!', 'success');
-                    resetForm();
-                    loadConfigurations();
+                    showStatus('Listen template saved successfully!', 'success');
                 } else {
                     const error = await response.text();
-                    showStatus('Failed to update node: ' + error, 'error');
+                    showStatus('Failed to save template: ' + error, 'error');
                 }
             } catch (error) {
                 showStatus('Network error: ' + error.message, 'error');
@@ -907,6 +988,12 @@
             updateProtocolOptions(document.querySelector('.listen-entry'));
             listenEntryIndex = 1; // Reset the global index
         }
+        
+        // Initialize page
+        document.addEventListener('DOMContentLoaded', async () => {
+            await loadListenTemplate();
+            await loadConfigurations();
+        });
     </script>
 </body>
 </html>

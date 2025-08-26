@@ -47,17 +47,30 @@ pub async fn migrate_database(db: &DatabaseConnection) -> Result<(), DbErr> {
     let schema = Schema::new(backend);
     
     // Create nodes table if it doesn't exist
-    let mut create_table_stmt = schema.create_table_from_entity(crate::database::entities::node::Entity);
+    let mut create_nodes_stmt = schema.create_table_from_entity(crate::database::entities::node::Entity);
     
     // Convert to SQL
-    let sql = match backend {
-        DbBackend::Sqlite => create_table_stmt.if_not_exists().to_string(SqliteQueryBuilder),
-        DbBackend::Postgres => create_table_stmt.if_not_exists().to_string(PostgresQueryBuilder),
-        DbBackend::MySql => create_table_stmt.if_not_exists().to_string(MysqlQueryBuilder),
+    let nodes_sql = match backend {
+        DbBackend::Sqlite => create_nodes_stmt.if_not_exists().to_string(SqliteQueryBuilder),
+        DbBackend::Postgres => create_nodes_stmt.if_not_exists().to_string(PostgresQueryBuilder),
+        DbBackend::MySql => create_nodes_stmt.if_not_exists().to_string(MysqlQueryBuilder),
     };
     
     // Execute the statement
-    db.execute(Statement::from_string(backend, sql)).await?;
+    db.execute(Statement::from_string(backend, nodes_sql)).await?;
+    
+    // Create settings table if it doesn't exist
+    let mut create_settings_stmt = schema.create_table_from_entity(crate::database::entities::settings::Entity);
+    
+    // Convert to SQL
+    let settings_sql = match backend {
+        DbBackend::Sqlite => create_settings_stmt.if_not_exists().to_string(SqliteQueryBuilder),
+        DbBackend::Postgres => create_settings_stmt.if_not_exists().to_string(PostgresQueryBuilder),
+        DbBackend::MySql => create_settings_stmt.if_not_exists().to_string(MysqlQueryBuilder),
+    };
+    
+    // Execute the statement
+    db.execute(Statement::from_string(backend, settings_sql)).await?;
     
     tracing::info!("Database migration completed");
     Ok(())

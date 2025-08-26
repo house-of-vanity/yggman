@@ -3,6 +3,7 @@ use crate::config::{AppConfig, ConfigManager};
 use crate::core::context::AppContext;
 use crate::core::module::ModuleManager;
 use crate::error::Result;
+use crate::settings_manager::SettingsManager;
 use tokio::signal;
 
 pub struct Application {
@@ -10,9 +11,18 @@ pub struct Application {
 }
 
 impl Application {
-    pub fn new(config: AppConfig) -> Self {
+    pub fn new(config: AppConfig, settings_manager: SettingsManager) -> Self {
         let config_manager = Arc::new(ConfigManager::new(config));
-        let context = Arc::new(AppContext::new(config_manager));
+        let context = Arc::new(AppContext::new(config_manager, Arc::new(settings_manager)));
+        let module_manager = ModuleManager::new(context);
+        
+        Self {
+            module_manager,
+        }
+    }
+    
+    pub fn new_with_managers(config_manager: ConfigManager, settings_manager: SettingsManager) -> Self {
+        let context = Arc::new(AppContext::new(Arc::new(config_manager), Arc::new(settings_manager)));
         let module_manager = ModuleManager::new(context);
         
         Self {

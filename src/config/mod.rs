@@ -102,6 +102,15 @@ impl ConfigManager {
         self.config.load_full()
     }
     
+    pub fn update_listen_template(&self, new_template: Vec<String>) {
+        let current = self.config.load_full();
+        let mut new_config = current.as_ref().clone();
+        new_config.nodes.default_listen_endpoints = new_template;
+        
+        self.config.store(Arc::new(new_config));
+        tracing::info!("Listen template updated in memory");
+    }
+    
     
     /// Load configuration from multiple sources with precedence:
     /// CLI args > Environment variables > Config file > Defaults

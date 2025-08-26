@@ -5,6 +5,7 @@ use std::sync::Arc;
 use tracing::{debug, error, info, warn};
 
 use crate::node_manager::NodeManager;
+use crate::core::context::AppContext;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type")]
@@ -42,6 +43,7 @@ pub enum ServerMessage {
 pub async fn handle_agent_socket(
     socket: WebSocket,
     node_manager: Arc<NodeManager>,
+    context: Arc<AppContext>,
 ) {
     let (mut sender, mut receiver) = socket.split();
     let (tx, mut rx) = tokio::sync::mpsc::channel::<ServerMessage>(100);
@@ -68,9 +70,14 @@ pub async fn handle_agent_socket(
                         AgentMessage::Register { name, addresses } => {
                             info!("Agent registration: {} with addresses {:?}", name, addresses);
                             
-                            // Get default endpoints from config
-                            // TODO: Get from actual config, for now use hardcoded
-                            let default_listen = vec!["tcp://0.0.0.0:9001".to_string()];
+                            // Get default endpoints from settings database
+                            let default_listen = match context.settings_manager.get_listen_template().await {
+                                Ok(template) => template,
+                                Err(e) => {
+                                    error!("Failed to get listen template from database: {}", e);
+                                    vec!["tcp://0.0.0.0:9001".to_string()] // fallback
+                                }
+                            };
                             
                             // Check if node already exists
                             let node = if let Some(existing_node) = node_manager.get_node_by_name(&name).await {
@@ -139,7 +146,28 @@ pub async fn handle_agent_socket(
                         AgentMessage::UpdateAddresses { addresses } => {
                             if let Some(id) = &node_id {
                                 info!("Address update for {}: {:?}", id, addresses);
-                                // TODO: Update node addresses in database
+                                
+                                // Get current node information
+                                if let Some(current_node) = node_manager.get_node_by_id(id).await {
+                                    // Update node with new addresses
+                                    match node_manager.update_node(
+                                        id, 
+                                        current_node.name.clone(), 
+                                        current_node.listen.clone(),
+                                        addresses
+                                    ).await {
+                                        Ok(_) => {
+                                            info!("Updated addresses for node {}", id);
+                                            // Broadcast configuration update to all agents
+                                            crate::websocket_state::broadcast_configuration_update(&node_manager).await;
+                                        }
+                                        Err(e) => {
+                                            error!("Failed to update addresses for node {}: {}", id, e);
+                                        }
+                                    }
+                                } else {
+                                    warn!("Cannot update addresses for unknown node: {}", id);
+                                }
                             }
                         }
                     }
