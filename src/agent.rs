@@ -36,6 +36,10 @@ struct Args {
     /// Skip automatic Yggdrasil service restart after config changes
     #[arg(long)]
     no_restart: bool,
+    
+    /// Custom command to restart Yggdrasil service (overrides platform detection)
+    #[arg(long)]
+    restart_command: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -187,7 +191,7 @@ async fn run_agent(args: &Args, ygg_config_path: &str) -> Result<()> {
                 match msg {
                     Some(Ok(Message::Text(text))) => {
                         match serde_json::from_str::<ServerMessage>(&text) {
-                            Ok(server_msg) => handle_server_message(server_msg, ygg_config_path, args.no_restart).await?,
+                            Ok(server_msg) => handle_server_message(server_msg, ygg_config_path, args.no_restart, &args.restart_command).await?,
                             Err(e) => warn!("Failed to parse server message: {}", e),
                         }
                     }
@@ -231,7 +235,7 @@ async fn run_agent(args: &Args, ygg_config_path: &str) -> Result<()> {
     Ok(())
 }
 
-async fn handle_server_message(msg: ServerMessage, ygg_config_path: &str, no_restart: bool) -> Result<()> {
+async fn handle_server_message(msg: ServerMessage, ygg_config_path: &str, no_restart: bool, restart_command: &Option<String>) -> Result<()> {
     match msg {
         ServerMessage::Config {
             node_id,
@@ -256,7 +260,7 @@ async fn handle_server_message(msg: ServerMessage, ygg_config_path: &str, no_res
                     info!("Configuration successfully written to {}", ygg_config_path);
                     // Restart Yggdrasil service to apply new configuration
                     if !no_restart {
-                        if let Err(e) = restart_yggdrasil_service() {
+                        if let Err(e) = restart_yggdrasil_service(restart_command) {
                             error!("Failed to restart Yggdrasil service: {}", e);
                         }
                     } else {
@@ -285,7 +289,7 @@ async fn handle_server_message(msg: ServerMessage, ygg_config_path: &str, no_res
                     info!("Configuration update successfully applied to {}", ygg_config_path);
                     // Restart Yggdrasil service to apply updated configuration
                     if !no_restart {
-                        if let Err(e) = restart_yggdrasil_service() {
+                        if let Err(e) = restart_yggdrasil_service(restart_command) {
                             error!("Failed to restart Yggdrasil service: {}", e);
                         }
                     } else {
@@ -373,10 +377,45 @@ async fn write_yggdrasil_config(
     });
     
     let config_json = serde_json::to_string_pretty(&config)?;
-    tokio::fs::write(config_path, config_json).await?;
     
-    info!("Yggdrasil configuration written to {}", config_path);
-    Ok(())
+    // Try to write directly first
+    match tokio::fs::write(config_path, &config_json).await {
+        Ok(_) => {
+            info!("Yggdrasil configuration written to {}", config_path);
+            Ok(())
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+            // Try with sudo if permission denied
+            warn!("Permission denied writing to {}, trying with sudo...", config_path);
+            
+            use std::process::Stdio;
+            use tokio::io::AsyncWriteExt;
+            
+            let mut child = tokio::process::Command::new("sudo")
+                .args(&["-n", "tee", config_path])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .stderr(Stdio::piped())
+                .spawn()?;
+            
+            if let Some(stdin) = child.stdin.as_mut() {
+                stdin.write_all(config_json.as_bytes()).await?;
+            }
+            
+            let output = child.wait_with_output().await?;
+            
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                error!("Failed to write config with sudo. Make sure the agent has sudo privileges.");
+                error!("You may need to add this to sudoers: 'username ALL=(ALL) NOPASSWD: /usr/bin/tee {}'", config_path);
+                return Err(anyhow!("Failed to write config with sudo: {}", stderr));
+            }
+            
+            info!("Yggdrasil configuration written to {} with sudo", config_path);
+            Ok(())
+        }
+        Err(e) => Err(anyhow!("Failed to write configuration: {}", e))
+    }
 }
 
 async fn update_yggdrasil_config(
@@ -417,26 +456,109 @@ async fn update_yggdrasil_config_full(
     
     // Write updated config back
     let updated_config = serde_json::to_string_pretty(&config)?;
-    tokio::fs::write(config_path, updated_config).await?;
     
-    info!("Yggdrasil configuration fully updated in {}", config_path);
-    Ok(())
+    // Try to write directly first
+    match tokio::fs::write(config_path, &updated_config).await {
+        Ok(_) => {
+            info!("Yggdrasil configuration fully updated in {}", config_path);
+            Ok(())
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+            // Try with sudo if permission denied
+            warn!("Permission denied writing to {}, trying with sudo...", config_path);
+            
+            use std::process::Stdio;
+            use tokio::io::AsyncWriteExt;
+            
+            let mut child = tokio::process::Command::new("sudo")
+                .args(&["-n", "tee", config_path])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .stderr(Stdio::piped())
+                .spawn()?;
+            
+            if let Some(stdin) = child.stdin.as_mut() {
+                stdin.write_all(updated_config.as_bytes()).await?;
+            }
+            
+            let output = child.wait_with_output().await?;
+            
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                error!("Failed to write config with sudo. Make sure the agent has sudo privileges.");
+                error!("You may need to add this to sudoers: 'username ALL=(ALL) NOPASSWD: /usr/bin/tee {}'", config_path);
+                return Err(anyhow!("Failed to write config with sudo: {}", stderr));
+            }
+            
+            info!("Yggdrasil configuration fully updated in {} with sudo", config_path);
+            Ok(())
+        }
+        Err(e) => Err(anyhow!("Failed to write configuration: {}", e))
+    }
 }
 
-fn restart_yggdrasil_service() -> Result<()> {
-    // Detect platform and restart accordingly
-    #[cfg(target_os = "linux")]
-    {
-        info!("Restarting Yggdrasil service on Linux...");
-        let output = Command::new("systemctl")
-            .args(&["restart", "yggdrasil"])
+fn restart_yggdrasil_service(custom_command: &Option<String>) -> Result<()> {
+    // If custom command is provided, use it
+    if let Some(cmd) = custom_command {
+        info!("Using custom restart command: {}", cmd);
+        let parts: Vec<&str> = cmd.split_whitespace().collect();
+        if parts.is_empty() {
+            return Err(anyhow!("Invalid custom restart command"));
+        }
+        
+        let output = Command::new(parts[0])
+            .args(&parts[1..])
             .output()?;
         
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(anyhow!("Failed to restart Yggdrasil service: {}", stderr));
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            error!("Custom restart command failed. Stderr: {}", stderr);
+            error!("Stdout: {}", stdout);
+            return Err(anyhow!("Failed to restart Yggdrasil with custom command: {}", stderr));
         }
-        info!("Yggdrasil service restarted successfully");
+        
+        info!("Yggdrasil service restarted successfully with custom command");
+        return Ok(());
+    }
+    
+    // Detect platform and restart accordingly
+    #[cfg(target_os = "linux")]
+    {
+        info!("Restarting Yggdrasil service on Linux...");
+        
+        // First try with systemctl directly (in case we're running as root)
+        let output = Command::new("systemctl")
+            .args(&["restart", "yggdrasil"])
+            .output();
+        
+        match output {
+            Ok(out) if out.status.success() => {
+                info!("Yggdrasil service restarted successfully");
+                return Ok(());
+            }
+            Ok(out) => {
+                let stderr = String::from_utf8_lossy(&out.stderr);
+                debug!("Direct systemctl failed: {}", stderr);
+                
+                // Try with sudo if direct systemctl failed
+                info!("Attempting restart with sudo...");
+                let sudo_output = Command::new("sudo")
+                    .args(&["-n", "systemctl", "restart", "yggdrasil"])
+                    .output()?;
+                
+                if !sudo_output.status.success() {
+                    let sudo_stderr = String::from_utf8_lossy(&sudo_output.stderr);
+                    error!("Failed to restart Yggdrasil service. Make sure the agent is running as root or has sudo privileges.");
+                    error!("You may need to add this to sudoers: 'username ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart yggdrasil'");
+                    return Err(anyhow!("Failed to restart Yggdrasil service: {}", sudo_stderr));
+                }
+                info!("Yggdrasil service restarted successfully with sudo");
+            }
+            Err(e) => {
+                return Err(anyhow!("Failed to execute systemctl: {}", e));
+            }
+        }
     }
     
     #[cfg(target_os = "macos")]
