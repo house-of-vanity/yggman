@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Duration;
 use std::path::Path;
+use std::process::Command;
 use tokio::time::sleep;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 use tracing::{error, info, warn, debug};
@@ -31,6 +32,10 @@ struct Args {
     /// Reconnect interval in seconds
     #[arg(long, default_value = "5")]
     reconnect_interval: u64,
+    
+    /// Skip automatic Yggdrasil service restart after config changes
+    #[arg(long)]
+    no_restart: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -182,7 +187,7 @@ async fn run_agent(args: &Args, ygg_config_path: &str) -> Result<()> {
                 match msg {
                     Some(Ok(Message::Text(text))) => {
                         match serde_json::from_str::<ServerMessage>(&text) {
-                            Ok(server_msg) => handle_server_message(server_msg, ygg_config_path).await?,
+                            Ok(server_msg) => handle_server_message(server_msg, ygg_config_path, args.no_restart).await?,
                             Err(e) => warn!("Failed to parse server message: {}", e),
                         }
                     }
@@ -226,7 +231,7 @@ async fn run_agent(args: &Args, ygg_config_path: &str) -> Result<()> {
     Ok(())
 }
 
-async fn handle_server_message(msg: ServerMessage, ygg_config_path: &str) -> Result<()> {
+async fn handle_server_message(msg: ServerMessage, ygg_config_path: &str, no_restart: bool) -> Result<()> {
     match msg {
         ServerMessage::Config {
             node_id,
@@ -247,7 +252,17 @@ async fn handle_server_message(msg: ServerMessage, ygg_config_path: &str) -> Res
             
             // Apply configuration to Yggdrasil
             match write_yggdrasil_config(ygg_config_path, &private_key, &listen, &peers, &allowed_public_keys).await {
-                Ok(_) => info!("Configuration successfully applied to {}", ygg_config_path),
+                Ok(_) => {
+                    info!("Configuration successfully written to {}", ygg_config_path);
+                    // Restart Yggdrasil service to apply new configuration
+                    if !no_restart {
+                        if let Err(e) = restart_yggdrasil_service() {
+                            error!("Failed to restart Yggdrasil service: {}", e);
+                        }
+                    } else {
+                        info!("Skipping service restart (--no-restart flag set)");
+                    }
+                },
                 Err(e) => error!("Failed to write Yggdrasil config: {}", e),
             }
         }
@@ -266,7 +281,17 @@ async fn handle_server_message(msg: ServerMessage, ygg_config_path: &str) -> Res
             
             // Apply full configuration update to Yggdrasil 
             match update_yggdrasil_config_full(ygg_config_path, &listen, &peers, &allowed_public_keys).await {
-                Ok(_) => info!("Configuration update successfully applied to {}", ygg_config_path),
+                Ok(_) => {
+                    info!("Configuration update successfully applied to {}", ygg_config_path);
+                    // Restart Yggdrasil service to apply updated configuration
+                    if !no_restart {
+                        if let Err(e) = restart_yggdrasil_service() {
+                            error!("Failed to restart Yggdrasil service: {}", e);
+                        }
+                    } else {
+                        info!("Skipping service restart (--no-restart flag set)");
+                    }
+                },
                 Err(e) => error!("Failed to update Yggdrasil config: {}", e),
             }
         }
@@ -395,5 +420,83 @@ async fn update_yggdrasil_config_full(
     tokio::fs::write(config_path, updated_config).await?;
     
     info!("Yggdrasil configuration fully updated in {}", config_path);
+    Ok(())
+}
+
+fn restart_yggdrasil_service() -> Result<()> {
+    // Detect platform and restart accordingly
+    #[cfg(target_os = "linux")]
+    {
+        info!("Restarting Yggdrasil service on Linux...");
+        let output = Command::new("systemctl")
+            .args(&["restart", "yggdrasil"])
+            .output()?;
+        
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(anyhow!("Failed to restart Yggdrasil service: {}", stderr));
+        }
+        info!("Yggdrasil service restarted successfully");
+    }
+    
+    #[cfg(target_os = "macos")]
+    {
+        info!("Restarting Yggdrasil service on macOS...");
+        
+        // First unload the service
+        let unload = Command::new("launchctl")
+            .args(&["unload", "/Library/LaunchDaemons/yggdrasil.plist"])
+            .output()?;
+        
+        if !unload.status.success() {
+            let stderr = String::from_utf8_lossy(&unload.stderr);
+            warn!("Failed to unload Yggdrasil service: {} (continuing anyway)", stderr);
+        }
+        
+        // Then load it again
+        let load = Command::new("launchctl")
+            .args(&["load", "/Library/LaunchDaemons/yggdrasil.plist"])
+            .output()?;
+        
+        if !load.status.success() {
+            let stderr = String::from_utf8_lossy(&load.stderr);
+            return Err(anyhow!("Failed to load Yggdrasil service: {}", stderr));
+        }
+        info!("Yggdrasil service restarted successfully");
+    }
+    
+    #[cfg(target_os = "freebsd")]
+    {
+        info!("Restarting Yggdrasil service on FreeBSD...");
+        let output = Command::new("service")
+            .args(&["yggdrasil", "restart"])
+            .output()?;
+        
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(anyhow!("Failed to restart Yggdrasil service: {}", stderr));
+        }
+        info!("Yggdrasil service restarted successfully");
+    }
+    
+    #[cfg(target_os = "openbsd")]
+    {
+        info!("Restarting Yggdrasil service on OpenBSD...");
+        let output = Command::new("rcctl")
+            .args(&["restart", "yggdrasil"])
+            .output()?;
+        
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(anyhow!("Failed to restart Yggdrasil service: {}", stderr));
+        }
+        info!("Yggdrasil service restarted successfully");
+    }
+    
+    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "freebsd", target_os = "openbsd")))]
+    {
+        warn!("Platform not supported for automatic service restart. Please restart Yggdrasil manually.");
+    }
+    
     Ok(())
 }
