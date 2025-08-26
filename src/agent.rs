@@ -57,6 +57,7 @@ enum ServerMessage {
         allowed_public_keys: Vec<String>,
     },
     Update {
+        listen: Vec<String>,
         peers: Vec<String>,
         allowed_public_keys: Vec<String>,
     },
@@ -251,19 +252,20 @@ async fn handle_server_message(msg: ServerMessage, ygg_config_path: &str) -> Res
             }
         }
         ServerMessage::Update {
+            listen,
             peers,
             allowed_public_keys,
         } => {
             info!("Received configuration update:");
+            info!("  Updated listen endpoints: {:?}", listen);
             info!("  Updated peers: {} configured", peers.len());
             for peer in &peers {
                 debug!("    - {}", peer);
             }
             info!("  Updated allowed keys: {} configured", allowed_public_keys.len());
             
-            // Apply configuration update to Yggdrasil 
-            // For updates we need to read current config and update only peers/allowed keys
-            match update_yggdrasil_config(ygg_config_path, &peers, &allowed_public_keys).await {
+            // Apply full configuration update to Yggdrasil 
+            match update_yggdrasil_config_full(ygg_config_path, &listen, &peers, &allowed_public_keys).await {
                 Ok(_) => info!("Configuration update successfully applied to {}", ygg_config_path),
                 Err(e) => error!("Failed to update Yggdrasil config: {}", e),
             }
@@ -370,5 +372,28 @@ async fn update_yggdrasil_config(
     tokio::fs::write(config_path, updated_config).await?;
     
     info!("Yggdrasil configuration updated in {}", config_path);
+    Ok(())
+}
+
+async fn update_yggdrasil_config_full(
+    config_path: &str,
+    listen: &[String],
+    peers: &[String],
+    allowed_public_keys: &[String]
+) -> Result<()> {
+    // Read current config
+    let current_config = tokio::fs::read_to_string(config_path).await?;
+    let mut config: serde_json::Value = serde_json::from_str(&current_config)?;
+    
+    // Update listen, peers and allowed public keys
+    config["Listen"] = serde_json::json!(listen);
+    config["Peers"] = serde_json::json!(peers);
+    config["AllowedPublicKeys"] = serde_json::json!(allowed_public_keys);
+    
+    // Write updated config back
+    let updated_config = serde_json::to_string_pretty(&config)?;
+    tokio::fs::write(config_path, updated_config).await?;
+    
+    info!("Yggdrasil configuration fully updated in {}", config_path);
     Ok(())
 }

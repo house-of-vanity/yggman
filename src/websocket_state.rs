@@ -35,6 +35,7 @@ pub async fn broadcast_configuration_update(node_manager: &Arc<NodeManager>) {
     for (node_id, tx) in connections.iter() {
         if let Some(config) = configs.get(node_id) {
             let update = ServerMessage::Update {
+                listen: config.listen.clone(),
                 peers: config.peers.clone(),
                 allowed_public_keys: config.allowed_public_keys.clone(),
             };
@@ -46,6 +47,7 @@ pub async fn broadcast_configuration_update(node_manager: &Arc<NodeManager>) {
         } else {
             // Node was deleted, send empty configuration to disconnect agent gracefully
             let update = ServerMessage::Update {
+                listen: vec![],
                 peers: vec![],
                 allowed_public_keys: vec![],
             };

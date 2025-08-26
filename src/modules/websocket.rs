@@ -31,6 +31,7 @@ pub enum ServerMessage {
         allowed_public_keys: Vec<String>,
     },
     Update {
+        listen: Vec<String>,
         peers: Vec<String>,
         allowed_public_keys: Vec<String>,
     },
