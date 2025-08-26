@@ -285,7 +285,7 @@ async fn handle_server_message(msg: ServerMessage, ygg_config_path: &str, no_res
             
             // Apply full configuration update to Yggdrasil 
             match update_yggdrasil_config_full(ygg_config_path, &listen, &peers, &allowed_public_keys).await {
-                Ok(_) => {
+                Ok(true) => {
                     info!("Configuration update successfully applied to {}", ygg_config_path);
                     // Restart Yggdrasil service to apply updated configuration
                     if !no_restart {
@@ -295,6 +295,9 @@ async fn handle_server_message(msg: ServerMessage, ygg_config_path: &str, no_res
                     } else {
                         info!("Skipping service restart (--no-restart flag set)");
                     }
+                },
+                Ok(false) => {
+                    info!("Configuration unchanged, skipping restart");
                 },
                 Err(e) => error!("Failed to update Yggdrasil config: {}", e),
             }
@@ -444,15 +447,29 @@ async fn update_yggdrasil_config_full(
     listen: &[String],
     peers: &[String],
     allowed_public_keys: &[String]
-) -> Result<()> {
+) -> Result<bool> {  // Returns true if config was updated
     // Read current config
     let current_config = tokio::fs::read_to_string(config_path).await?;
     let mut config: serde_json::Value = serde_json::from_str(&current_config)?;
     
+    // Check if config actually changed
+    let old_listen = config["Listen"].clone();
+    let old_peers = config["Peers"].clone();
+    let old_keys = config["AllowedPublicKeys"].clone();
+    
+    let new_listen = serde_json::json!(listen);
+    let new_peers = serde_json::json!(peers);
+    let new_keys = serde_json::json!(allowed_public_keys);
+    
+    if old_listen == new_listen && old_peers == new_peers && old_keys == new_keys {
+        debug!("Configuration unchanged, skipping update");
+        return Ok(false);
+    }
+    
     // Update listen, peers and allowed public keys
-    config["Listen"] = serde_json::json!(listen);
-    config["Peers"] = serde_json::json!(peers);
-    config["AllowedPublicKeys"] = serde_json::json!(allowed_public_keys);
+    config["Listen"] = new_listen;
+    config["Peers"] = new_peers;
+    config["AllowedPublicKeys"] = new_keys;
     
     // Write updated config back
     let updated_config = serde_json::to_string_pretty(&config)?;
@@ -461,7 +478,7 @@ async fn update_yggdrasil_config_full(
     match tokio::fs::write(config_path, &updated_config).await {
         Ok(_) => {
             info!("Yggdrasil configuration fully updated in {}", config_path);
-            Ok(())
+            Ok(true)
         }
         Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
             // Try with sudo if permission denied
@@ -491,7 +508,7 @@ async fn update_yggdrasil_config_full(
             }
             
             info!("Yggdrasil configuration fully updated in {} with sudo", config_path);
-            Ok(())
+            Ok(true)
         }
         Err(e) => Err(anyhow!("Failed to write configuration: {}", e))
     }

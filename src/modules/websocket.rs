@@ -150,21 +150,32 @@ pub async fn handle_agent_socket(
                                 
                                 // Get current node information
                                 if let Some(current_node) = node_manager.get_node_by_id(id).await {
-                                    // Update node with new addresses
-                                    match node_manager.update_node(
-                                        id, 
-                                        current_node.name.clone(), 
-                                        current_node.listen.clone(),
-                                        addresses
-                                    ).await {
-                                        Ok(_) => {
-                                            info!("Updated addresses for node {}", id);
-                                            // Broadcast configuration update to all agents
-                                            crate::websocket_state::broadcast_configuration_update(&node_manager).await;
+                                    // Sort addresses for comparison to avoid false positives
+                                    let mut new_addresses = addresses.clone();
+                                    new_addresses.sort();
+                                    let mut current_addresses = current_node.addresses.clone();
+                                    current_addresses.sort();
+                                    
+                                    // Only update if addresses actually changed
+                                    if new_addresses != current_addresses {
+                                        // Update node with new addresses
+                                        match node_manager.update_node(
+                                            id, 
+                                            current_node.name.clone(), 
+                                            current_node.listen.clone(),
+                                            addresses
+                                        ).await {
+                                            Ok(_) => {
+                                                info!("Updated addresses for node {}", id);
+                                                // Broadcast configuration update to all agents
+                                                crate::websocket_state::broadcast_configuration_update(&node_manager).await;
+                                            }
+                                            Err(e) => {
+                                                error!("Failed to update addresses for node {}: {}", id, e);
+                                            }
                                         }
-                                        Err(e) => {
-                                            error!("Failed to update addresses for node {}: {}", id, e);
-                                        }
+                                    } else {
+                                        debug!("Address list unchanged for node {}, skipping update", id);
                                     }
                                 } else {
                                     warn!("Cannot update addresses for unknown node: {}", id);
